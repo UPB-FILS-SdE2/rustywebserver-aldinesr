@@ -37,9 +37,7 @@ for stream in listner.incoming(){
     let root_folder = root_folder.to_string();
     thread::spawn(move||
     {
-        if let Err(e) = handle_connection(stream, root_folder){
-            eprintln!("connection error:{}",e);
-        }
+       
     });
 
 }
