@@ -2,3 +2,7 @@
 # Rustwebserver
 
 Detail the homework implementation.
+
+
+i start by using #[tokio::main]
+to make the main function async,
