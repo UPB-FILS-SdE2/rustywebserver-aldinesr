@@ -29,7 +29,7 @@ if args.len()!=3{
 let port = &args[1];
 let root_folder = &args[2];
 
-let listner = TcpListener::bind(format!(0.0.0.0:{},port))?;
+let listner = TcpListener::bind(format!("0.0.0.0:{}",port))?;
 
 
 for stream in listner.incoming(){
