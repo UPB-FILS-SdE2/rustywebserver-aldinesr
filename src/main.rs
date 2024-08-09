@@ -45,3 +45,60 @@ for stream in listner.incoming(){
     Ok(())
   
 } 
+
+fn connections(mut stream: TcpStream, root_folder: String) -> std::io::Result<()> {
+
+    let mut buff = [0;1024];
+
+    stream.read(&mut buff)?;
+
+    let request = String ::from_utf8_lossy(&buff);
+    let (method,path)=requests(&request);
+
+    let full_path = Path::new(&root_folder).join(&path.trim_start_matches('/'));
+      if path.starts_with("/..") || !full_path.starts_with(root_folder) {
+     
+        let response = b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n<html>403 Forbidden</html>";
+        stream.write_all(response)?;
+    } else {
+        match fs::read(&full_path) {
+            Ok(content) => {
+                let content_type = get_extensions(&full_path);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    content_type, content.len()
+                );
+                stream.write_all(response.as_bytes())?;
+                stream.write_all(&content)?;
+            }
+            Err(_) => {
+      
+                let response = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n<html>404 Not Found</html>";
+                stream.write_all(response)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn requests(request:&str)->(&str,&str){
+    let mut lines = request.lines();
+    let request_line =lines.next().unwrap_or("");
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let path = parts.next().unwrap_or("");
+    (method, path)
+}
+
+fn get_extensions(path: &Path)->&'static str{
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        Some("zip") => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
