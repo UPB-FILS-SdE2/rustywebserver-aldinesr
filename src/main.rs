@@ -27,7 +27,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
 
-    
     let port = &args[1];
     let root_folder = &args[2];
 
@@ -47,6 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 }
+
 
 async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 8192];
