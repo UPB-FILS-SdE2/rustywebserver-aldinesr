@@ -48,25 +48,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
+// async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
+//     let mut buffer = [0; 8192];
+//     let bytes_read = stream.read(&mut buffer).await?;
+//     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    
+//     let (request_line, headers, body) = parse_request(&request);
+//     let (method, path) = parse_request_line(&request_line);
+    
+//     let client_ip = stream.peer_addr()?.ip().to_string();
+
+//     match method {
+//         "GET" => handle_get(&mut stream, &root, path, &client_ip).await?,
+//         "POST" => handle_post(&mut stream, &root, path, &client_ip, body).await?,
+//         _ => send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?,
+//     }
+
+//     Ok(())
+// }
+
 async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 8192];
-    let bytes_read = stream.read(&mut buffer).await?;
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
-    
+    let size = stream.read(&mut buffer).await?;
+    let request = String::from_utf8_lossy(&buffer[..size]);
     let (request_line, headers, body) = parse_request(&request);
-    let (method, path) = parse_request_line(&request_line);
-    
+    let (method, path, _) = process_request_line(&request_line);
+
     let client_ip = stream.peer_addr()?.ip().to_string();
 
     match method {
-        "GET" => handle_get(&mut stream, &root, path, &client_ip).await?,
-        "POST" => handle_post(&mut stream, &root, path, &client_ip, body).await?,
-        _ => send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?,
+        "GET" => {
+            if path.starts_with("/scripts/") {
+                handle_script(&mut stream, &root, &path, &headers, &client_ip, "GET", &body).await?;
+            } else {
+                handle_get(&mut stream, &root, &path, &client_ip).await?;
+            }
+        },
+        "POST" => {
+            if path.starts_with("/scripts/") {
+                handle_script(&mut stream, &root, &path, &headers, &client_ip, "POST", &body).await?;
+            } else {
+                send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+            }
+        },
+        _ => {
+            send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+        }
     }
 
     Ok(())
 }
-
 
 fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
     let mut parts = request.split("\r\n\r\n");
