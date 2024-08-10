@@ -21,37 +21,6 @@ use tokio::fs::File;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // println!("Test ");
-
-    let args: Vec<String> = env::args().collect();
-
-    if args.len()!=3{
-        eprintln!("Usage:{} <PORT><ROOT_FOLDER>",args[0]);
-        std::process::exit(1);
-    }
-    
-
-    // let root_folder = args[2].clone();
-    let port = &args[1];
-    // let root_folder = &args[2];
-    let root_folder = PathBuf::from(&args[2]);
-    // println!("Test Port {} ",args[1]);
-    // println!("Test root folder {} ",args[2]);
-    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
-    let root = Arc::new(root_folder.to_string_lossy().to_string());
-    loop{
-        let (socket, _) = listener.accept().await?;
-        let root = Arc::clone(&root);
-
-        tokio::spawn(async move {
-            if let Err(e) = connections(socket, root).await {
-                eprintln!("Error handling connection: {}", e);
-            }
-        });
-    }
-}
-
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 3 {
         eprintln!("Usage: {} <PORT> <ROOT_FOLDER>", args[0]);
