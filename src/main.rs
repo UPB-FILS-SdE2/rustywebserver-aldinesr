@@ -18,6 +18,20 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs::File;
 
+fn contentType(path: &Path) -> String {
+    match path.extension().and_then(std::ffi::OsStr::to_str) {
+        Some("txt") => "text/plain; charset=utf-8".to_string(),
+        Some("html") => "text/html; charset=utf-8".to_string(),
+        Some("css") => "text/css; charset=utf-8".to_string(),
+        Some("js") => "text/javascript; charset=utf-8".to_string(),
+        Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
+        Some("png") => "image/png".to_string(),
+        Some("zip") => "application/zip".to_string(),
+        _ => "application/octet-stream".to_string(),
+    }
+}
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,74 +54,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (stream, _) = listener.accept().await?;
         let root = Arc::clone(&root);
         tokio::spawn(async move {
-            if let Err(e) = connections(stream, root).await {
+            if let Err(e) = handle_connection(stream, root).await {
                 eprintln!("Error handling connection: {}", e);
             }
         });
     }
 }
 
-async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_connection(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 8192];
     let size = stream.read(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer[..size]);
+    
     let (request_line, headers, body) = parse_request(&request);
     let (method, path, _) = process_request_line(&request_line);
-
     let client_ip = stream.peer_addr()?.ip().to_string();
 
+    process_request_method(&mut stream, &root, &method, &path, &headers, &body, &client_ip).await
+}
+
+async fn process_request_method(
+    stream: &mut TcpStream,
+    root: &Arc<String>,
+    method: &str,
+    path: &str,
+    headers: &[Header],
+    body: &str,
+    client_ip: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     match method {
         "GET" => {
             if path.starts_with("/scripts/") {
-                handle_script(&mut stream, &root, &path, &headers, &client_ip, "GET", &body).await?;
+                handle_script(stream, root, path, headers, client_ip, "GET", body).await?;
             } else {
-                handle_get(&mut stream, &root, &path, &client_ip).await?;
+                handle_get(stream, root, path, client_ip).await?;
             }
         },
         "POST" => {
             if path.starts_with("/scripts/") {
-                handle_script(&mut stream, &root, &path, &headers, &client_ip, "POST", &body).await?;
+                handle_script(stream, root, path, headers, client_ip, "POST", body).await?;
             } else {
-                send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+                send_response(stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
             }
         },
         _ => {
-            send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+            send_response(stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
         }
     }
 
     Ok(())
 }
 
+
 fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
-    let mut parts = request.split("\r\n\r\n");
+    let mut parts = request.splitn(2, "\r\n\r\n");
     let header_part = parts.next().unwrap_or("");
-    let body = parts.next().unwrap_or("").to_string();
+    let message = parts.next().unwrap_or("").to_string();
 
-    let mut headers = HashMap::new();
-    let mut lines = header_part.lines();
-    let request_line = lines.next().unwrap_or("").to_string();
+    let mut headers = header_part.lines();
+    let request_line = headers.next().unwrap_or("").to_string();
 
-    for line in lines {
-        if let Some((key, value)) = line.split_once(": ") {
-            headers.insert(key.to_string(), value.to_string());
+    let mut header_map = HashMap::new();
+    for header in headers {
+        let mut parts = header.splitn(2, ": ");
+        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+            header_map.insert(key.to_string(), value.to_string());
         }
     }
 
-    (request_line, headers, body)
+    (request_line, header_map, message)
 }
 
-fn parse_request_line(request_line: &str) -> (&str, &str) {
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("");
-    (method, path)
-}
-
-
-fn log_request(method: &str, client_ip: &str, path: &str, status_code: u32, status_text: &str) {
-    println!("{} {} {} -> {} ({})", method, client_ip, path, status_code, status_text);
-}
 fn process_request_line(request_line: &str) -> (&str, &str, &str) {
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or("");
@@ -115,61 +132,67 @@ fn process_request_line(request_line: &str) -> (&str, &str, &str) {
     let version = parts.next().unwrap_or("");
     (method, path, version)
 }
-
 async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let requested_path = Path::new(root).join(path.trim_start_matches('/'));
-
-    if requested_path.is_file() {
-        match fs::read(&requested_path).await {
-            Ok(content) => {
-                let content_type = get_content_type(&requested_path);
-                send_response(stream, 200, "OK", &content_type, &String::from_utf8_lossy(&content)).await?;
-            },
-            Err(_) => {
-                send_response(stream, 403, "Forbidden", "text/html; charset=utf-8", "<html>403 Forbidden</html>").await?;
-            }
+    let root_path = PathBuf::from(root);
+    let requested_path = root_path.join(path.trim_start_matches('/'));
+    
+    let normalized_requested_path = match fs::canonicalize(&requested_path).await {
+        Ok(p) => p,
+        Err(_) => {
+            log_request("GET", client_ip, path, 404, "Not Found");
+            send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
+            return Ok(());
         }
-    } else if requested_path.is_dir() {
-        // Directory handling as above
-    } else {
-        send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
+    };
+    
+    let normalized_root_path = fs::canonicalize(&root_path).await?;
+    
+    if !normalized_requested_path.starts_with(&normalized_root_path) {
+        log_request("GET", client_ip, path, 403, "Forbidden");
+        send_response(stream, 403, "Forbidden", "text/html; charset=utf-8", "<html>403 Forbidden</html>").await?;
+        return Ok(());
     }
 
-    Ok(())
+    process_request_path(stream, &normalized_requested_path, client_ip, path).await
 }
 
 
-
-
-async fn handle_post(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str, body: String) -> Result<(), Box<dyn std::error::Error>> {
-    send_response(stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
-    Ok(())
-}
-
-
-async fn send_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, body: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let content_length = body.len();
-    let response = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        status_code, status, content_type, content_length, body
-    );
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
-}
-
-
-
-
-fn get_content_type(path: &Path) -> String {
-    match path.extension().and_then(std::ffi::OsStr::to_str) {
-        Some("html") => "text/html; charset=utf-8".to_string(),
-        Some("css") => "text/css; charset=utf-8".to_string(),
-        Some("js") => "application/javascript".to_string(),
-        Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
-        Some("png") => "image/png".to_string(),
-        _ => "application/octet-stream".to_string(),
+async fn process_request_path(
+    stream: &mut TcpStream,
+    normalized_requested_path: &PathBuf,
+    client_ip: &str,
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match fs::metadata(&normalized_requested_path).await {
+        Ok(metadata) => {
+            if metadata.is_dir() {
+                handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
+            } else if metadata.is_file() {
+                match fs::read(&normalized_requested_path).await {
+                    Ok(content) => {
+                        let content_type = get_content_type(&normalized_requested_path);
+                        log_request("GET", client_ip, path, 200, "OK");
+                        send_binary_response(stream, 200, "OK", &content_type, &content).await?;
+                    },
+                    Err(e) => {
+                        eprintln!("Error reading file: {:?}", e);
+                        log_request("GET", client_ip, path, 403, "Forbidden");
+                        send_response(stream, 403, "Forbidden", "text/html; charset=utf-8", "<html>403 Forbidden</html>").await?;
+                    }
+                }
+            } else {
+                log_request("GET", client_ip, path, 404, "Not Found");
+                send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
+            }
+        },
+        Err(e) => {
+            eprintln!("Error getting metadata: {:?}", e);
+            log_request("GET", client_ip, path, 404, "Not Found");
+            send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
+        }
     }
 }
+
 
 async fn send_binary_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, content: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     let headers = format!(
@@ -284,6 +307,7 @@ async fn handle_script(
 }
 
 
+
 async fn send_script_response(
     stream: &mut TcpStream,
     status_code: u32,
@@ -314,4 +338,30 @@ async fn send_script_response(
     
     stream.write_all(response.as_bytes()).await?;
     Ok(())
+}
+
+fn get_content_type(path: &Path) -> String {
+    match path.extension().and_then(std::ffi::OsStr::to_str) {
+        Some("txt") => "text/plain; charset=utf-8".to_string(),
+        Some("html") => "text/html; charset=utf-8".to_string(),
+        Some("css") => "text/css; charset=utf-8".to_string(),
+        Some("js") => "text/javascript; charset=utf-8".to_string(),
+        Some("jpg") | Some("jpeg") => "image/jpeg".to_string(),
+        Some("png") => "image/png".to_string(),
+        Some("zip") => "application/zip".to_string(),
+        _ => "application/octet-stream".to_string(),
+    }
+}
+
+async fn send_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let response = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        status_code, status, content_type, message.len(), message
+    );
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+fn log_request(method: &str, client_ip: &str, path: &str, status_code: u32, status_text: &str) {
+    println!("{} {} {} -> {} ({})", method, client_ip, path, status_code, status_text);
 }
