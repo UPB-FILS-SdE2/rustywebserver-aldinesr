@@ -51,6 +51,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() != 3 {
+        eprintln!("Usage: {} <PORT> <ROOT_FOLDER>", args[0]);
+        std::process::exit(1);
+    }
+
+    let port = &args[1];
+    let root_folder = &args[2];
+
+    println!("Root folder: {}", fs::canonicalize(root_folder).await?.display());
+    println!("Server listening on 0.0.0.0:{}", port);
+
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
+    let root = Arc::new(root_folder.to_string());
+
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let root = Arc::clone(&root);
+        tokio::spawn(async move {
+            if let Err(e) = connections(stream, root).await {
+                eprintln!("Error handling connection: {}", e);
+            }
+        });
+    }
+}
 
 async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 8192];
