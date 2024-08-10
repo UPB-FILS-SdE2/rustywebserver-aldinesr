@@ -6,3 +6,5 @@ Detail the homework implementation.
 
 i start by using #[tokio::main]
 to make the main function async,
+then start reading the command line and make the args[1] its for port
+2 its for folder _root
