@@ -63,8 +63,16 @@ async fn handle_connection(mut stream: TcpStream, root: Arc<String>) -> Result<(
     let size = stream.read(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer[..size]);
     let (request_line, headers, body) = parse_request(&request);
-    let (method, path, _) = process_request_line(&request_line);
-
+    // let (method, path, _) = process_request_line(&request_line);
+    let (method, path, _) = {
+        let mut parts = request_line.split(' ');
+    
+        let method = parts.next().unwrap_or("");
+        let path = parts.next().unwrap_or("");
+        let version = parts.next().unwrap_or("");
+    
+        (method, path, version)
+    };
     let client_ip = stream.peer_addr()?.ip().to_string();
 
     match method {
