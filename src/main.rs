@@ -218,15 +218,6 @@ fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
 // }
 
 
-fn process_request_line(request_line: &str) -> (&str, &str, &str) {
-    let mut parts = request_line.split(' ');
-    
-    let method = parts.next().unwrap_or("");
-    let path = parts.next().unwrap_or("");
-    let version = parts.next().unwrap_or("");
-
-    (method, path, version)
-}
 
 
 async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
