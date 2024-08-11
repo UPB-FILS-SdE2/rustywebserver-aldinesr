@@ -250,7 +250,14 @@ async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &
                     Ok(content) => {
                         let content_type = get_content_type(&normalized_requested_path);
                         log_request("GET", client_ip, path, 200, "OK");
-                        send_binary_response(stream, 200, "OK", &content_type, &content).await?;
+                    
+                        let headers = format!(
+                            "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            200, "OK", content_type, content.len()
+                        );
+                        stream.write_all(headers.as_bytes()).await?;
+                        stream.write_all(&content).await?;
+                    
                     },
                     Err(e) => {
                         eprintln!("Error reading file: {:?}", e);
