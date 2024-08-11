@@ -57,34 +57,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+
 async fn handle_connection(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut buffer = [0; 8192];
     let size = stream.read(&mut buffer).await?;
     let request = String::from_utf8_lossy(&buffer[..size]);
-    
+    let (request_line, headers, body) = parse_request(&request);
+    let (method, path, _) = process_request_line(&request_line);
 
-    
+    let client_ip = stream.peer_addr()?.ip().to_string();
 
-
-
+    match method {
+        "GET" => {
+            if path.starts_with("/scripts/") {
+                handle_script(&mut stream, &root, &path, &headers, &client_ip, "GET", &body).await?;
+            } else {
+                handle_get(&mut stream, &root, &path, &client_ip).await?;
+            }
+        },
+        "POST" => {
+            if path.starts_with("/scripts/") {
+                handle_script(&mut stream, &root, &path, &headers, &client_ip, "POST", &body).await?;
+            } else {
+                send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+            }
+        },
+        _ => {
+            send_response(&mut stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
+        }
+    }
 
     Ok(())
 }
 
 
 fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
-    let mut parts = request.splitn(2, "\r\n\r\n");
+   
+    let mut parts = request.split("\r\n\r\n");
     let header_part = parts.next().unwrap_or("");
     let message = parts.next().unwrap_or("").to_string();
 
-    let mut headers = header_part.lines();
-    let request_line = headers.next().unwrap_or("").to_string();
-
-    let mut header_map = HashMap::new();
+  
+    let mut lines = header_part.lines();
+    let request_line = lines.next().unwrap_or("").to_string();
 
   
-    for header in headers {
-        if let Some((key, value)) = header.split_once(": ") {
+    let mut header_map = HashMap::new();
+    for line in lines {
+        if let Some((key, value)) = line.split_once(": ") {
             header_map.insert(key.to_string(), value.to_string());
         }
     }
@@ -92,17 +112,17 @@ fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
     (request_line, header_map, message)
 }
 
-//possible to modify it
-fn process_request_line(request_line: &str) -> (&str, &str, &str) {
-    let (method, path, version) = match request_line.split_whitespace().collect::<Vec<_>>().as_slice() {
-        [method, path, version, ..] => (*method, *path, *version),
-        [method, path] => (*method, *path, ""),
-        [method] => (*method, "", ""),
-        [] => ("", "", ""),
-    };
+// //possible to modify it
+// fn process_request_line(request_line: &str) -> (&str, &str, &str) {
+//     let (method, path, version) = match request_line.split_whitespace().collect::<Vec<_>>().as_slice() {
+//         [method, path, version, ..] => (*method, *path, *version),
+//         [method, path] => (*method, *path, ""),
+//         [method] => (*method, "", ""),
+//         [] => ("", "", ""),
+//     };
 
-    (method, path, version)
-}
+//     (method, path, version)
+// }
 
 
 //posible to modify it
@@ -146,6 +166,60 @@ fn process_request_line(request_line: &str) -> (&str, &str, &str) {
 
 //     Ok(())
 // }
+
+
+//to modify or remove and add it in the handle get
+// async fn send_error_response(
+//     stream: &mut TcpStream,
+//     client_ip: &str,
+//     path: &str,
+//     status_code: u16,
+//     status_message: &str,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     log_request("GET", client_ip, path, status_code, status_message);
+//     send_response(
+//         stream,
+//         status_code,
+//         status_message,
+//         "text/html; charset=utf-8",
+//         &format!("<html>{} {}</html>", status_code, status_message),
+//     )
+//     .await?;
+//     Ok(())
+// }
+
+//to modify or remove and add it in the handle get
+// async fn handle_file_response(
+//     stream: &mut TcpStream,
+//     path: &PathBuf,
+//     client_ip: &str,
+//     request_path: &str,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     match fs::read(path).await {
+//         Ok(content) => {
+//             let content_type = get_content_type(path);
+//             log_request("GET", client_ip, request_path, 200, "OK");
+//             send_binary_response(stream, 200, "OK", &content_type, &content).await?;
+//         }
+//         Err(e) => {
+//             eprintln!("Error reading file: {:?}", e);
+//             // send_error_response(stream, client_ip, request_path, 403, "Forbidden").await?;
+//         }
+//     }
+//     Ok(())
+// }
+
+
+fn process_request_line(request_line: &str) -> (&str, &str, &str) {
+    let mut parts = request_line.split(' ');
+    
+    let method = parts.next().unwrap_or("");
+    let path = parts.next().unwrap_or("");
+    let version = parts.next().unwrap_or("");
+
+    (method, path, version)
+}
+
 
 async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
     let root_path = PathBuf::from(root);
@@ -196,102 +270,6 @@ async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &
             send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
         }
     }
-
-    Ok(())
-}
-
-//to modify or remove and add it in the handle get
-// async fn send_error_response(
-//     stream: &mut TcpStream,
-//     client_ip: &str,
-//     path: &str,
-//     status_code: u16,
-//     status_message: &str,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     log_request("GET", client_ip, path, status_code, status_message);
-//     send_response(
-//         stream,
-//         status_code,
-//         status_message,
-//         "text/html; charset=utf-8",
-//         &format!("<html>{} {}</html>", status_code, status_message),
-//     )
-//     .await?;
-//     Ok(())
-// }
-
-//to modify or remove and add it in the handle get
-async fn handle_file_response(
-    stream: &mut TcpStream,
-    path: &PathBuf,
-    client_ip: &str,
-    request_path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match fs::read(path).await {
-        Ok(content) => {
-            let content_type = get_content_type(path);
-            log_request("GET", client_ip, request_path, 200, "OK");
-            send_binary_response(stream, 200, "OK", &content_type, &content).await?;
-        }
-        Err(e) => {
-            eprintln!("Error reading file: {:?}", e);
-            // send_error_response(stream, client_ip, request_path, 403, "Forbidden").await?;
-        }
-    }
-    Ok(())
-}
-
-
-
-async fn send_binary_response(
-    stream: &mut TcpStream,
-    status_code: u32,
-    status: &str,
-    content_type: &str,
-    content: &[u8]
-) -> Result<(), Box<dyn std::error::Error>> {
-    let headers = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status_code, status, content_type, content.len()
-    );
-
-    let mut response = Vec::with_capacity(headers.len() + content.len());
-    response.extend_from_slice(headers.as_bytes());
-    response.extend_from_slice(content);
-
-    stream.write_all(&response).await?;
-    Ok(())
-}
-
-async fn handle_directory_listing(
-    stream: &mut TcpStream,
-    full_path: &Path,
-    display_path: &str,
-    client_ip: &str
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut html = String::with_capacity(1024); 
-    html.push_str("<html><h1>Directory Listing</h1><ul>");
-    html.push_str("<li><a href=\"..\">..</a></li>");
-
-    let mut entries = fs::read_dir(full_path).await?;
-    let mut entry_items = Vec::new(); 
-
-    while let Some(entry) = entries.next_entry().await? {
-        if let Some(name) = entry.file_name().to_str() {
-            entry_items.push(name.to_string());
-        }
-    }
-
-  
-    for name in entry_items {
-        html.push_str(&format!("<li><a href=\"{}\">{}</a></li>", name, name));
-    }
-
-    html.push_str("</ul></html>");
-
-  
-    log_request("GET", client_ip, display_path, 200, "OK");
-    send_response(stream, 200, "OK", "text/html; charset=utf-8", &html).await?;
 
     Ok(())
 }
@@ -356,6 +334,37 @@ async fn handle_directory_listing(
 
 //     Ok(())
 // }
+async fn send_binary_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, content: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let headers = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status_code, status, content_type, content.len()
+    );
+    stream.write_all(headers.as_bytes()).await?;
+    stream.write_all(content).await?;
+    Ok(())
+}
+
+async fn handle_directory_listing(stream: &mut TcpStream, full_path: &Path, display_path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut html = String::from("<html><h1>Directory Listing</h1><ul>");
+
+    html.push_str("<li><a href=\"..\">..</a></li>");
+
+    let mut entries = fs::read_dir(full_path).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        if let Some(name) = file_name.to_str() {
+            html.push_str(&format!("<li><a href=\"{}\">{}</a></li>", name, name));
+        }
+    }
+
+    html.push_str("</ul></html>");
+
+    log_request("GET",client_ip, display_path, 200, "OK");
+    send_response(stream, 200, "OK", "text/html; charset=utf-8", &html).await?;
+
+    Ok(())
+}
+
 async fn handle_script(
     stream: &mut TcpStream,
     root: &str,
@@ -365,88 +374,110 @@ async fn handle_script(
     method: &str,
     body: &str
 ) -> Result<(), Box<dyn std::error::Error>> {
-
-    let (script_path_str, query_string) = path.split_once('?').unwrap_or((path, ""));
-    let script_path_str = script_path_str.trim_start_matches("/scripts/");
+    let parts: Vec<&str> = path.splitn(2, '?').collect();
+    let script_path_str = parts[0].trim_start_matches("/scripts/");
     let script_path = Path::new(root).join("scripts").join(script_path_str);
 
-   
-    if !script_path.is_file() {
+    if !script_path.exists() || !script_path.is_file() {
         log_request(method, client_ip, path, 404, "Not Found");
-        // return send_error_response(stream, 404, "Not Found").await;
+        send_response(stream, 404, "Not Found", "text/html; charset=utf-8", "<html>404 Not Found</html>").await?;
+        return Ok(());
     }
 
+    let mut command = Command::new(script_path);
+    command.env_clear()
+           .envs(headers)
+           .env("METHOD", method)
+           .env("PATH", path)
+           .stdout(Stdio::piped())
+           .stderr(Stdio::piped());
 
-    let headers = headers.clone(); 
-    let method = method.to_string(); 
-    let path = path.to_string(); 
+    if parts.len() > 1 {
+        parts[1].split('&').for_each(|param| {
+            if let Some((key, value)) = param.split_once('=') {
+                command.env(format!("QUERY_{}", key), value);
+            }
+        });
+    }
 
-    let mut command = Command::new(&script_path)
-    .env_clear()
-    .envs(&headers)
-    .env("METHOD", &method)
-    .env("PATH", &path)
-    .stdout(tokio::process::Stdio::piped())
-    .stderr(tokio::process::Stdio::piped())
-    
-
-
-
-    query_string.split('&').for_each(|param| {
-        if let Some((key, value)) = param.split_once('=') {
-            command.env(format!("QUERY_{}", key), value);
-        }
-    });
-
-    
     if method == "POST" {
-        command.stdin(std::process::Stdio::piped());
+        command.stdin(Stdio::piped());
     }
 
-    // let mut child = command.spawn().await?;
-    let mut child = command.spawn().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-
+    let mut child = command.spawn()?;
     if method == "POST" {
         if let Some(mut stdin) = child.stdin.take() {
-            io::copy(&mut body.as_bytes(), &mut stdin).await?;
+            tokio::io::copy(&mut body.as_bytes(), &mut stdin).await?;
         }
     }
 
     let output = child.wait_with_output().await?;
-    let output_status = output.status;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    
-    if output_status.success() {
-        let (headers, response_body) = parse_script_output(&stdout);
+
+    if output.status.success() {
+        let content = String::from_utf8_lossy(&output.stdout);
+        let lines = content.lines();
         
-        // log_request(method, client_ip, script_path_str, 200, "OK");
-        // send_script_response(stream, 200, "OK", &headers, &response_body).await?;
+        let mut script_headers = HashMap::new();
+        let mut response_body = String::new();
+        let mut reading_body = false;
+        for line in lines {
+            if reading_body {
+                response_body.push_str(line);
+                response_body.push('\n');
+            } else if line.is_empty() {
+                reading_body = true;
+            } else if let Some((key, value)) = line.split_once(':') {
+                script_headers.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+
+        let response_body = response_body.trim_end().to_string();
+        
+        log_request(method, client_ip, parts[0], 200, "OK");
+        send_script_response(stream, 200, "OK", &script_headers, &response_body).await?;
     } else {
-        // log_request(method, client_ip, path, 500, "Internal Server Error");
-        // send_error_response(stream, 500, "Internal Server Error").await?;
+        let error_message = "<html>500 Internal Server Error</html>";
+        log_request(method, client_ip, path, 500, "Internal Server Error");
+        let mut error_headers = HashMap::new();
+        error_headers.insert("Content-Type".to_string(), "text/html; charset=utf-8".to_string());
+        send_script_response(stream, 500, "Internal Server Error", &error_headers, error_message).await?;
     }
 
     Ok(())
 }
 
-fn parse_script_output(output: &str) -> (HashMap<String, String>, String) {
-    let mut headers = HashMap::new();
-    let mut body = String::new();
-    let mut reading_body = false;
-    
-    for line in output.lines() {
-        if reading_body {
-            body.push_str(line);
-            body.push('\n');
-        } else if line.is_empty() {
-            reading_body = true;
-        } else if let Some((key, value)) = line.split_once(':') {
-            headers.insert(key.trim().to_string(), value.trim().to_string());
-        }
-    }
 
-    (headers, body.trim_end().to_string())
-}
+// async fn send_script_response(
+//     stream: &mut TcpStream,
+//     status_code: u32,
+//     status: &str,
+//     script_headers: &HashMap<String, String>,
+//     body: &str
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     let mut response = format!(
+//         "HTTP/1.1 {} {}\r\n",
+//         status_code, status
+//     );
+
+//     let mut content_length_set = false;
+
+//     for (key, value) in script_headers {
+//         if key.to_lowercase() == "content-length" {
+//             content_length_set = true;
+//         }
+//         response.push_str(&format!("{}: {}\r\n", key, value));
+//     }
+
+//     if !content_length_set {
+//         response.push_str(&format!("Content-Length: {}\r\n", body.len()));
+//     }
+
+//     response.push_str("Connection: close\r\n\r\n");
+//     response.push_str(body);
+    
+//     stream.write_all(response.as_bytes()).await?;
+//     Ok(())
+// }
 
 
 async fn send_script_response(
@@ -481,6 +512,7 @@ async fn send_script_response(
     Ok(())
 }
 
+
 fn get_content_type(path: &Path) -> String {
     match path.extension().and_then(std::ffi::OsStr::to_str) {
         Some("txt") => "text/plain; charset=utf-8".to_string(),
@@ -493,6 +525,7 @@ fn get_content_type(path: &Path) -> String {
         _ => "application/octet-stream".to_string(),
     }
 }
+
 
 async fn send_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, message: &str) -> Result<(), Box<dyn std::error::Error>> {
     let response = format!(
