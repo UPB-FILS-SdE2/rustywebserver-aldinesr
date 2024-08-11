@@ -340,15 +340,7 @@ async fn handle_get(stream: &mut TcpStream, root: &str, path: &str, client_ip: &
 
 //     Ok(())
 // }
-async fn send_binary_response(stream: &mut TcpStream, status_code: u32, status: &str, content_type: &str, content: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    let headers = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        status_code, status, content_type, content.len()
-    );
-    stream.write_all(headers.as_bytes()).await?;
-    stream.write_all(content).await?;
-    Ok(())
-}
+
 
 async fn handle_directory_listing(stream: &mut TcpStream, full_path: &Path, display_path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
     let mut html = String::from("<html><h1>Directory Listing</h1><ul>");
