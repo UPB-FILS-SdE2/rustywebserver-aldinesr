@@ -19,16 +19,6 @@ use std::path::{Path, PathBuf};
 use tokio::fs::File;
 
 
-
-
-
-
-
-
-
-
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -97,6 +87,7 @@ async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box
                 handle_script(&mut stream, &root, &path, &headers, &client_ip, "GET", &body).await?;
             } else {
                 get_function(&mut stream, &root, &path, &client_ip).await?;
+                
             }
         },
         "POST" => {
@@ -143,6 +134,7 @@ async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip:
         Ok(metadata) => {
             if metadata.is_dir() {
                 // handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
+                
             } else if metadata.is_file() {
                 match fs::read(&normalized_requested_path).await {
                     Ok(content) => {
