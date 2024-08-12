@@ -115,26 +115,6 @@ async fn handle_connection(mut stream: TcpStream, root: Arc<String>) -> Result<(
 }
 
 
-fn parse_request(request: &str) -> (String, HashMap<String, String>, String) {
-   
-    let mut parts = request.split("\r\n\r\n");
-    let header_part = parts.next().unwrap_or("");
-    let message = parts.next().unwrap_or("").to_string();
-
-  
-    let mut lines = header_part.lines();
-    let request_line = lines.next().unwrap_or("").to_string();
-
-  
-    let mut header_map = HashMap::new();
-    for line in lines {
-        if let Some((key, value)) = line.split_once(": ") {
-            header_map.insert(key.to_string(), value.to_string());
-        }
-    }
-
-    (request_line, header_map, message)
-}
 
 // //possible to modify it
 // fn process_request_line(request_line: &str) -> (&str, &str, &str) {
