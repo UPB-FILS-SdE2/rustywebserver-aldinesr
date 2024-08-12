@@ -133,7 +133,7 @@ async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip:
     match fs::metadata(&normalized_requested_path).await {
         Ok(metadata) => {
             if metadata.is_dir() {
-                // handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
+                handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
                 
             } else if metadata.is_file() {
                 match fs::read(&normalized_requested_path).await {
