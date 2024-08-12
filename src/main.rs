@@ -96,8 +96,7 @@ async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box
             if path.starts_with("/scripts/") {
                 handle_script(&mut stream, &root, &path, &headers, &client_ip, "GET", &body).await?;
             } else {
-                // get_function(&mut stream, &root, &path, &client_ip).await?;
-                get_function(&mut stream, &root, &path, &client_ip, method).await?;
+                get_function(&mut stream, &root, &path, &client_ip).await?;
             }
         },
         "POST" => {
@@ -119,10 +118,7 @@ async fn connections(mut stream: TcpStream, root: Arc<String>) -> Result<(), Box
 
 
 
-// async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>>
-async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str, method: &str) -> Result<(), Box<dyn std::error::Error>> 
-
-{
+async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip: &str) -> Result<(), Box<dyn std::error::Error>> {
     let root_path = PathBuf::from(root);
     let requested_path = root_path.join(path.trim_start_matches('/'));
     
@@ -147,15 +143,6 @@ async fn get_function(stream: &mut TcpStream, root: &str, path: &str, client_ip:
         Ok(metadata) => {
             if metadata.is_dir() {
                 // handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
-
-                if method == "POST" {
-                    // Handle POST request for directories
-                    log_request("POST", client_ip, path, 405, "Method Not Allowed");
-                    send_response(stream, 405, "Method Not Allowed", "text/html; charset=utf-8", "<html>405 Method Not Allowed</html>").await?;
-                } else {
-                    handle_directory_listing(stream, &normalized_requested_path, path, client_ip).await?;
-                }
-
             } else if metadata.is_file() {
                 match fs::read(&normalized_requested_path).await {
                     Ok(content) => {
@@ -233,6 +220,8 @@ async fn handle_script(
     }
 
     let mut command = Command::new(script_path);
+    
+    
     command.env_clear()
            .envs(headers)
            .env("METHOD", method)
